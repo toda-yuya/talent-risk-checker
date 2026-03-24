@@ -48,12 +48,10 @@ def get_simulated_posts(keyword):
     
     for i in range(8):
         platform = random.choice(platforms)
-        # キーワードに合わせてリスクワードを抽選
         risk_word = random.choice(list(KEYWORD_MAP.keys()))
         level_key = KEYWORD_MAP[risk_word]
         level_info = RISK_LEVELS[level_key]
         
-        # 慰謝料計算
         amount = random.randint(level_info["range"][0], level_info["range"][1])
         total_estimated += amount
         
@@ -114,14 +112,14 @@ if st.button("リスク診断を開始"):
                 for k, v in RISK_LEVELS.items()
             ]))
 
-        # --- 5. ベンナビIT 導線 ---
+        # --- 5. Yahoo! JAPAN への誘導ボタン（ここを修正！） ---
         st.markdown(f"""
-            <div style="background-color: #fff4f4; padding: 25px; border-radius: 10px; text-align: center; border: 2px solid #dc3545; margin-top: 30px;">
-                <h3 style="color: #dc3545; margin-top:0;">法的措置をご検討ですか？</h3>
-                <p>検知された「名誉毀損」「プライバシー侵害」等の書き込みは、<b>ベンナビIT</b>を通じて削除や特定ができる可能性があります。</p>
-                <a href="https://itbengo-pro.com/" target="_blank" style="text-decoration: none;">
-                    <button style="background-color: #dc3545; color: white; padding: 15px 30px; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em; font-weight: bold;">
-                        ベンナビITでIT専門の弁護士を探す（無料相談可能）
+            <div style="background-color: #f0f4f8; padding: 25px; border-radius: 10px; text-align: center; border: 2px solid #003399; margin-top: 30px;">
+                <h3 style="color: #003399; margin-top:0;">このキーワードについてさらに調べますか？</h3>
+                <p>検知された「名誉毀損」等のリスクについて、一般的な解決方法や事例を検索エンジンで確認できます。</p>
+                <a href="https://www.yahoo.co.jp/" target="_blank" style="text-decoration: none;">
+                    <button style="background-color: #003399; color: white; padding: 15px 30px; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em; font-weight: bold;">
+                        Yahoo! JAPAN で誹謗中傷対策を調べる
                     </button>
                 </a>
             </div>
