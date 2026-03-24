@@ -1,133 +1,133 @@
 import streamlit as st
 import pandas as pd
-import time
 import random
-from datetime import datetime, timedelta
+import time
+from datetime import datetime
 
-# --- 1. ページ設定（アシロ社をイメージしたリーガルテック風） ---
-st.set_page_config(page_title="アシロ版・風評チェッカー", page_icon="⚖️", layout="wide")
+# --- 1. ページ設定（プロトタイプ感を出しつつ洗練） ---
+st.set_page_config(page_title="誹謗中傷リスク・可視化ツール", page_icon="⚖️", layout="wide")
 
-# カスタムCSSでデザインを調整
+# カスタムCSS（X風、5ch風のスタイル）
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stButton>button { background-color: #004a99; color: white; border-radius: 5px; width: 100%; }
-    .report-box { padding: 20px; border-radius: 10px; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-    .status-a { color: #28a745; font-weight: bold; }
-    .status-d { color: #dc3545; font-weight: bold; }
+    .report-box { padding: 20px; border-radius: 10px; background-color: white; border: 1px solid #e1e8ed; margin-bottom: 10px; }
+    .x-post { border: 1px solid #e1e8ed; padding: 15px; border-radius: 12px; background-color: #ffffff; }
+    .x-user { font-weight: bold; color: #14171a; }
+    .x-handle { color: #657786; font-size: 0.9em; }
+    .ch5-post { background-color: #efefef; padding: 10px; border: 1px solid #ccc; font-family: "MS PGothic", "ＭＳ Ｐゴシック", sans-serif; font-size: 0.9em; line-height: 1.4; color: #000; }
+    .ch5-header { color: #228b22; font-weight: bold; }
+    .level-badge { padding: 2px 8px; border-radius: 4px; color: white; font-weight: bold; font-size: 0.8em; }
+    .lv1 { background-color: #6c757d; } .lv2 { background-color: #ffc107; color: black; } 
+    .lv3 { background-color: #fd7e14; } .lv4 { background-color: #dc3545; } .lv5 { background-color: #8b0000; }
+    .amount-text { font-size: 1.2em; font-weight: bold; color: #d63384; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. ネガティブワード辞書（30種類以上） ---
-NEGATIVE_WORDS = {
-    "炎上": 15, "最悪": 10, "ブラック": 12, "詐欺": 20, "逮捕": 25, 
-    "不倫": 18, "枕": 15, "パワハラ": 15, "セクハラ": 15, "嫌い": 8,
-    "事件": 20, "不祥事": 20, "怪しい": 10, "ゴミ": 10, "無能": 10,
-    "倒産": 20, "裁判": 15, "訴訟": 15, "被害": 12, "隠蔽": 18,
-    "反社": 25, "嘘": 10, "パクリ": 10, "低評価": 8, "対応悪い": 10,
-    "ステマ": 12, "流出": 18, "謝罪": 10, "危険": 15, "不潔": 10,
-    "辞めたい": 10, "パワハラ会議": 15, "偽装": 18, "捏造": 18
+# --- 2. 慰謝料ロジック & ワードデータベース ---
+RISK_LEVELS = {
+    "Lv.1": {"name": "受忍限度内", "range": (0, 30000), "class": "lv1", "desc": "単発の侮辱"},
+    "Lv.2": {"name": "名誉感情の侵害", "range": (50000, 150000), "class": "lv2", "desc": "執拗な侮辱"},
+    "Lv.3": {"name": "プライバシー侵害", "range": (100000, 500000), "class": "lv3", "desc": "私事の暴露"},
+    "Lv.4": {"name": "名誉毀損(個人)", "range": (200000, 500000), "class": "lv4", "desc": "事実の摘示"},
+    "Lv.5": {"name": "名誉毀損(法人)", "range": (500000, 1000000), "class": "lv5", "desc": "業務妨害"}
 }
 
-# --- 3. 診断ロジック（デモ用シミュレーター） ---
-def simulate_search(keyword):
-    # 本来はここでGoogle Custom Search API等を叩く
-    # デモ用にキーワードに応じたランダムな結果を生成
-    results = []
-    found_negatives = []
-    total_score = 0
+KEYWORD_MAP = {
+    "バカ": "Lv.1", "ブス": "Lv.1", "下手くそ": "Lv.1", "消えろ": "Lv.1",
+    "死ね": "Lv.2", "キモい": "Lv.2", "ゴミ": "Lv.2", "社会の害悪": "Lv.2",
+    "本名": "Lv.3", "住所": "Lv.3", "経歴": "Lv.3", "元カレ": "Lv.3",
+    "不倫": "Lv.4", "詐欺師": "Lv.4", "前科": "Lv.4", "パクリ": "Lv.4",
+    "食中毒": "Lv.5", "反社": "Lv.5", "隠蔽": "Lv.5", "粉飾": "Lv.5"
+}
+
+# --- 3. 診断シミュレーション ---
+def get_simulated_posts(keyword):
+    platforms = ["X (Twitter)", "5ちゃんねる"]
+    posts = []
+    total_estimated = 0
     
-    # シミュレーション用の検索結果（直近24時間分を想定）
-    for i in range(10):
-        # キーワードによってリスクを変える（デモ用）
-        if "AnyColor" in keyword or "炎上" in keyword:
-            is_neg = random.random() < 0.4
+    for i in range(8):
+        platform = random.choice(platforms)
+        # キーワードに合わせてリスクワードを抽選
+        risk_word = random.choice(list(KEYWORD_MAP.keys()))
+        level_key = KEYWORD_MAP[risk_word]
+        level_info = RISK_LEVELS[level_key]
+        
+        # 慰謝料計算
+        amount = random.randint(level_info["range"][0], level_info["range"][1])
+        total_estimated += amount
+        
+        if platform == "X (Twitter)":
+            content = f"さっきの{keyword}の配信見たけど、本当に{risk_word}だわ。これ許されるの？ #炎上 #拡散希望"
+            html = f"""
+            <div class="x-post">
+                <span class="x-user">匿名ユーザー @user_{random.randint(100,999)}</span> <span class="x-handle">・ 2h</span><br>
+                {content}<br><br>
+                <span class="level-badge {level_info['class']}">{level_key}: {level_info['name']}</span>
+                <span style="margin-left:10px;">想定慰謝料: <span class="amount-text">{amount:,}円</span></span>
+            </div><br>
+            """
         else:
-            is_neg = random.random() < 0.1
-            
-        if is_neg:
-            word = random.choice(list(NEGATIVE_WORDS.keys()))
-            title = f"【悲報】{keyword}、ネットで「{word}」と話題に..."
-            snippet = f"直近24時間の投稿をまとめると、{keyword}に関する{word}疑惑が浮上しており..."
-            score = NEGATIVE_WORDS[word]
-            found_negatives.append(word)
-            total_score += score
-        else:
-            title = f"{keyword}の最新活動レポート - 公式ニュース"
-            snippet = f"{keyword}の今後の展開について、ポジティブな意見が集まっています。"
-            
-        results.append({"title": title, "snippet": snippet, "is_neg": is_neg})
+            id_str = f"{random.choice('abcdefg')}{random.randint(1000,9999)}"
+            html = f"""
+            <div class="ch5-post">
+                <span class="ch5-header">{i+1} 名前：名無しさん＠お腹いっぱい。 [sage] 投稿日：2026/03/24(火) 14:02:15.82 ID:{id_str}</span><br><br>
+                {keyword}について語るスレ<br>
+                >>{i} {risk_word}すぎて草。はやく引退しろよ。<br><br>
+                <span class="level-badge {level_info['class']}">{level_key}: {level_info['name']}</span>
+                <span style="margin-left:10px;">想定慰謝料: <span class="amount-text">{amount:,}円</span></span>
+            </div><br>
+            """
+        posts.append(html)
     
-    # ランク判定
-    if total_score == 0: rank, color = "A", "safe"
-    elif total_score < 20: rank, color = "B", "warning"
-    elif total_score < 50: rank, color = "C", "alert"
-    else: rank, color = "D", "danger"
-    
-    return results, rank, total_score, list(set(found_negatives))
+    return posts, total_estimated
 
 # --- 4. 画面レイアウト ---
-st.title("⚖️ 風評被害・即時診断ツール (Prototye)")
-st.write("直近24時間のネット上の書き込みをスキャンし、法的リスクをスコアリングします。")
+st.title("⚖️ 誹謗中傷リスク・可視化プロトタイプ")
+st.caption("※本ツールは個人による技術検証用プロトタイプです。実際の検索結果とは異なります。")
 
-# 検索窓
-col1, col2 = st.columns([4, 1])
-with col1:
-    target_kw = st.text_input("調査したいキーワードを入力してください（タレント名、会社名など）", placeholder="例：株式会社アシロ")
-with col2:
-    st.write(" ") # 余白
-    search_btn = st.button("診断開始")
+target_kw = st.text_input("調査キーワード（タレント名・事務所名など）", placeholder="例：AnyColor")
 
-if search_btn or target_kw:
-    with st.spinner('AIが直近24時間のデータを解析中...'):
-        time.sleep(1.5) # 演出
-        results, rank, score, neg_list = simulate_search(target_kw)
+if st.button("リスク診断を開始"):
+    if target_kw:
+        with st.spinner('各プラットフォームからデータを解析中...'):
+            time.sleep(1.5)
+            results, total_amount = get_simulated_posts(target_kw)
+        
+        col1, col2, col3 = st.columns(3)
+        col1.metric("検知されたリスク件数", f"{len(results)} 件")
+        col2.metric("想定合計回収金額", f"¥{total_amount:,}")
+        col3.error("最優先アクション：開示請求準備")
+        
+        st.divider()
+        
+        tab1, tab2 = st.tabs(["📊 タイムライン分析", "📜 慰謝料算出ロジック"])
+        
+        with tab1:
+            for p in results:
+                st.markdown(p, unsafe_allow_html=True)
+                
+        with tab2:
+            st.write("本プロトタイプで採用している慰謝料相場（判例に基づく想定）")
+            st.table(pd.DataFrame([
+                {"レベル": k, "内容": v["name"], "相場": f"{v['range'][0]:,}〜{v['range'][1]:,}円", "区分": v["desc"]}
+                for k, v in RISK_LEVELS.items()
+            ]))
 
-    # 診断結果ヘッダー
-    st.subheader(f"「{target_kw}」の診断結果")
-    
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.metric("リスクランク", f"ランク {rank}")
-    with c2:
-        st.metric("リスクスコア", f"{score} pt")
-    with c3:
-        st.metric("検知ワード数", f"{len(neg_list)} 件")
-
-    # プログレスバー（ゲージ代わり）
-    st.progress(min(score, 100) / 100)
-
-    # 詳細タブ
-    tab1, tab2 = st.tabs(["🔍 検出されたリスク詳細", "📄 全検索結果一覧"])
-    
-    with tab1:
-        if neg_list:
-            st.warning(f"以下のネガティブワードが検出されました： {', '.join(neg_list)}")
-            st.write("これらは将来的に**発信者情報開示請求**や**削除請求**の対象となる可能性があります。")
-        else:
-            st.success("直近24時間以内に顕著なリスクは検出されませんでした。")
-
-    with tab2:
-        for res in results:
-            if res["is_neg"]:
-                st.error(f"**{res['title']}**\n\n{res['snippet']}")
-            else:
-                st.info(f"**{res['title']}**\n\n{res['snippet']}")
-
-    # --- 5. 弁護士相談CTAバナー ---
-    st.markdown("---")
-    st.markdown(f"""
-        <div style="background-color: #eef4ff; padding: 30px; border-radius: 10px; text-align: center; border: 2px solid #004a99;">
-            <h3 style="color: #004a99;">法的措置をご検討ですか？</h3>
-            <p>検知された「{', '.join(neg_list[:3])}...」等の書き込みは、弁護士を通じて削除や特定ができる可能性があります。</p>
-            <a href="https://benchmark.legal/" target="_blank">
-                <button style="background-color: #004a99; color: white; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 18px;">
-                    ベンナビで専門弁護士を探す（無料相談可能）
-                </button>
-            </a>
-        </div>
-    """, unsafe_allow_html=True)
-
-else:
-    # 初期画面のガイド
-    st.info("検索窓にキーワードを入力して「診断開始」を押してください。")
+        # --- 5. ベンナビIT 導線 ---
+        st.markdown(f"""
+            <div style="background-color: #fff4f4; padding: 25px; border-radius: 10px; text-align: center; border: 2px solid #dc3545; margin-top: 30px;">
+                <h3 style="color: #dc3545; margin-top:0;">法的措置をご検討ですか？</h3>
+                <p>検知された「名誉毀損」「プライバシー侵害」等の書き込みは、<b>ベンナビIT</b>を通じて削除や特定ができる可能性があります。</p>
+                <a href="https://itbengo-pro.com/" target="_blank" style="text-decoration: none;">
+                    <button style="background-color: #dc3545; color: white; padding: 15px 30px; border: none; border-radius: 5px; cursor: pointer; font-size: 1.1em; font-weight: bold;">
+                        ベンナビITでIT専門の弁護士を探す（無料相談可能）
+                    </button>
+                </a>
+            </div>
+            <p style="font-size: 0.8em; color: #666; text-align: center; margin-top: 10px;">
+                ※本金額はシミュレーションであり、実際の賠償額を保証するものではありません。
+            </p>
+        """, unsafe_allow_html=True)
+    else:
+        st.warning("キーワードを入力してください。")
